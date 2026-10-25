@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0b0920">
+<title>Join the Kingdom</title>
+<style>
+  :root { --bg: #0b0920; --panel: #1a1538; --ink: #ffd666; --text: #eee8ff; --muted: #9b93c4; --bad: #ff8a8a; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body { margin: 0; background: radial-gradient(circle at 50% 0%, #2a1f5c, var(--bg) 70%); color: var(--text); font: 17px/1.4 system-ui, sans-serif; }
+  main { max-width: 420px; margin: 0 auto; padding: 32px 16px; display: flex; flex-direction: column; gap: 16px; min-height: 100%; }
+  h1 { margin: 0; font-size: 28px; text-align: center; }
+  h1 small { display: block; color: var(--muted); font-size: 15px; font-weight: normal; margin-top: 4px; }
+  label { display: block; color: var(--muted); font-size: 14px; margin-bottom: 6px; }
+  input { width: 100%; padding: 14px; font: inherit; font-size: 20px; border-radius: 12px; border: 2px solid #3a3270; background: var(--panel); color: var(--text); }
+  input:focus { outline: none; border-color: var(--ink); }
+  #code { text-transform: uppercase; letter-spacing: 0.4em; text-align: center; font-weight: 700; }
+  button { width: 100%; padding: 16px; font: inherit; font-size: 20px; font-weight: 700; border: 0; border-radius: 12px; background: var(--ink); color: #1a1538; }
+  button:disabled { opacity: 0.5; }
+  .error { color: var(--bad); min-height: 1.4em; text-align: center; }
+  .card { background: var(--panel); border-radius: 16px; padding: 20px; text-align: center; }
+  .big { font-size: 24px; }
+  .big b { color: var(--ink); }
+  ul { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+  li { background: #120e28; border-radius: 999px; padding: 6px 14px; }
+  li.me { box-shadow: 0 0 0 2px var(--ink) inset; }
+  li.away { opacity: 0.45; }
+  .muted { color: var(--muted); font-size: 14px; text-align: center; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>✦ Mirror, Mirror ✦<small>Join the Kingdom</small></h1>
+
+  <form id="joinForm" class="card" style="display:flex;flex-direction:column;gap:14px;text-align:left">
+    <div>
+      <label for="code">Room code</label>
+      <input id="code" maxlength="4" autocomplete="off" autocapitalize="characters" inputmode="text" placeholder="ABCD" required>
+    </div>
+    <div>
+      <label for="name">Your name</label>
+      <input id="name" maxlength="16" autocomplete="nickname" placeholder="Rapunzel" required>
+    </div>
+    <button id="joinBtn" type="submit">Enter the castle</button>
+    <div class="error" id="error"></div>
+  </form>
+
+  <section id="lobby" class="card" hidden>
+    <div class="big">Welcome, <b id="me"></b></div>
+    <p class="muted" style="margin:6px 0 0">Room <b id="roomCode"></b>. Waiting for the game to start…</p>
+    <ul id="players"></ul>
+  </section>
+
+  <p class="muted" id="status"></p>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const KEY = 'mirror-seat'; // { code, playerId, name } so a sleeping phone can rejoin
+const load = () => { try { return JSON.parse(localStorage.getItem(KEY)) || {}; } catch { return {}; } };
+const save = (v) => { try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} };
+const forget = () => { try { localStorage.removeItem(KEY); } catch {} };
+
+let seat = load();
+let ws = null, retry = null, wantJoin = null;
+
+const params = new URLSearchParams(location.search);
+$('code').value = (params.get('room') || seat.code || '').toUpperCase();
+$('name').value = seat.name || '';
+if ($('code').value) $('name').focus();
+// A new room code in the QR link means a new game: drop the old seat.
+if (params.get('room') && seat.code && params.get('room').toUpperCase() !== seat.code) { forget(); seat = {}; }
+
+function connect() {
+  clearTimeout(retry);
+  ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+  ws.onopen = () => {
+    $('status').textContent = '';
+    // Reconnect silently if we already have a seat; otherwise wait for the form.
+    if (seat.playerId) ws.send(JSON.stringify({ type: 'join', code: seat.code, playerId: seat.playerId }));
+    else if (wantJoin) ws.send(JSON.stringify(wantJoin));
+  };
+  ws.onmessage = (e) => handle(JSON.parse(e.data));
+  ws.onclose = () => {
+    $('status').textContent = 'Reconnecting…';
+    retry = setTimeout(connect, 1500);
+  };
+}
+
+function handle(msg) {
+  if (msg.type === 'joined') {
+    seat = { code: msg.code, playerId: msg.playerId, name: msg.name };
+    save(seat);
+    wantJoin = null;
+    $('me').textContent = msg.name;
+    $('roomCode').textContent = msg.code;
+    $('joinForm').hidden = true;
+    $('lobby').hidden = false;
+  } else if (msg.type === 'lobby') {
+    $('players').replaceChildren(...msg.players.map((p) => {
+      const li = document.createElement('li');
+      li.textContent = p.name;
+      if (p.id === seat.playerId) li.className = 'me';
+      else if (!p.connected) li.className = 'away';
+      return li;
+    }));
+  } else if (msg.type === 'error') {
+    if (seat.playerId) { forget(); seat = {}; } // stale seat: room gone or we were dropped
+    showForm(msg.message);
+  } else if (msg.type === 'closed' || msg.type === 'kicked') {
+    forget(); seat = {};
+    showForm(msg.type === 'closed' ? 'The game has ended.' : 'You were removed from the room.');
+  }
+}
+
+function showForm(error) {
+  wantJoin = null;
+  $('joinBtn').disabled = false;
+  $('error').textContent = error || '';
+  $('lobby').hidden = true;
+  $('joinForm').hidden = false;
+}
+
+$('joinForm').onsubmit = (e) => {
+  e.preventDefault();
+  $('error').textContent = '';
+  $('joinBtn').disabled = true;
+  wantJoin = { type: 'join', code: $('code').value.trim().toUpperCase(), name: $('name').value.trim() };
+  if (ws?.readyState === 1) ws.send(JSON.stringify(wantJoin));
+  else connect();
+};
+
+// Phones pause pages in the background; reconnect as soon as we're visible again.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && ws?.readyState !== 1) connect();
+});
+
+connect();
+</script>
+</body>
+</html>

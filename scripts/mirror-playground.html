@@ -1,0 +1,530 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mirror Playground</title>
+<style>
+  :root { --bg: #0b0920; --panel: #1a1538; --ink: #ffd666; --text: #eee8ff; --muted: #9b93c4; --good: #7ee0a1; --bad: #ff8a8a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.4 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; grid-template-columns: minmax(0, 640px) 1fr; }
+  @media (max-width: 820px) { main { grid-template-columns: 1fr; } }
+  h1 { grid-column: 1 / -1; margin: 0; font-size: 22px; }
+  .stage { position: relative; width: 100%; aspect-ratio: 1; background: #120e28; border-radius: 12px; overflow: hidden; }
+  .stage > video, .stage > canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+  video { object-fit: cover; transform: scaleX(-1); opacity: 0.25; }
+  video.hidden { visibility: hidden; }
+  #ink { touch-action: none; cursor: crosshair; }
+  #cursor { z-index: 3; pointer-events: none; } /* hand cursor floats above the toolbars */
+  .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  button, select { background: var(--panel); color: var(--text); border: 1px solid #3a3270; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; }
+  button.primary { background: var(--ink); color: #1a1538; border-color: var(--ink); font-weight: 600; }
+  label { color: var(--muted); display: flex; gap: 6px; align-items: center; }
+  .panel { background: var(--panel); border-radius: 12px; padding: 14px; }
+  .sees { font-size: 24px; min-height: 34px; }
+  .sees span { color: var(--ink); }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 12px 0; text-align: center; }
+  .stats div { background: #120e28; border-radius: 8px; padding: 8px 4px; }
+  .stats b { display: block; font-size: 18px; }
+  .stats small { color: var(--muted); }
+  ol { margin: 0; padding-left: 20px; max-height: 340px; overflow-y: auto; font-variant-numeric: tabular-nums; }
+  li { padding: 2px 0; }
+  .slow { color: var(--bad); } .fast { color: var(--good); }
+  .muted { color: var(--muted); font-size: 13px; }
+  #handStatus { color: var(--muted); }
+  /* Air toolbars: on the stage, pressed by pinching over them. Never part of the snapshot. */
+  .airbar { position: absolute; z-index: 2; display: flex; gap: 1%; padding: 1%; background: rgba(11, 9, 32, 0.78); }
+  .airbar.top { top: 0; left: 0; right: 0; height: 12%; }
+  .airbar.side { top: 12%; left: 0; bottom: 0; width: 11%; flex-direction: column; }
+  .airbtn { flex: 1; min-width: 0; min-height: 0; padding: 0 2px; font-size: clamp(10px, 2.2vw, 15px); border-radius: 10px; transition: transform 0.08s; }
+  .airbtn.on { border-color: var(--ink); box-shadow: 0 0 0 3px var(--ink) inset; }
+  .airbtn.hover { transform: scale(1.08); border-color: #fff; background: #2c2560; }
+  .airbtn.flash { background: var(--ink); color: #1a1538; }
+  .airbtn:disabled { opacity: 0.35; cursor: default; }
+  .airbtn.swatch { border-radius: 50%; aspect-ratio: 1; flex: 0 1 auto; align-self: center; height: 9%; border: 2px solid #3a3270; }
+  .airbtn.swatch.on { border-color: #fff; box-shadow: 0 0 0 3px var(--bg) inset; }
+  /* Room / lobby */
+  .side-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+  .room { display: grid; grid-template-columns: 132px 1fr; gap: 14px; align-items: center; }
+  .qr { background: #fff; border-radius: 10px; padding: 6px; aspect-ratio: 1; }
+  .qr svg { display: block; width: 100%; height: 100%; }
+  .code { font-size: 44px; font-weight: 800; letter-spacing: 0.15em; color: var(--ink); line-height: 1; }
+  .joinurl { color: var(--muted); font-size: 13px; word-break: break-all; margin-top: 6px; }
+  .players { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 6px; max-height: none; }
+  .players li { background: #120e28; border-radius: 999px; padding: 4px 12px; cursor: pointer; }
+  .players li.away { opacity: 0.45; }
+  .players li:hover { text-decoration: line-through; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Mirror, mirror, what did I draw?</h1>
+
+  <section>
+    <!-- Layers: camera (local only) / ink (what the Mirror sees) / cursor overlay -->
+    <div class="stage">
+      <video id="video" playsinline muted></video>
+      <canvas id="ink" width="640" height="640"></canvas>
+      <canvas id="cursor" width="640" height="640"></canvas>
+      <div class="airbar top">
+        <button class="airbtn" id="undo" disabled>↶ Undo</button>
+        <button class="airbtn" id="redo" disabled>↷ Redo</button>
+        <button class="airbtn" id="clear">✕ Clear</button>
+        <button class="airbtn" id="ask">🪞 Ask</button>
+        <button class="airbtn" id="auto">Auto: off</button>
+      </div>
+      <div class="airbar side" id="swatches">
+        <!-- color swatches are inserted here -->
+        <button class="airbtn" id="eraser">Erase</button>
+        <button class="airbtn" id="brush">Med</button>
+      </div>
+    </div>
+    <div class="row">
+      <button class="primary" id="cam" disabled>Starting camera…</button>
+      <label><input type="checkbox" id="showCam" checked> Show camera</label>
+      <span id="handStatus">Starting camera…</span>
+    </div>
+    <div class="row">
+      <label>Model <select id="model">
+        <option>muse-spark-1.1</option><option>muse-spark-1.3</option><option>muse-spark-1.2</option>
+      </select></label>
+      <label>Effort <select id="effort">
+        <option>minimal</option><option>default</option>
+      </select></label>
+      <label>Snapshot <select id="size">
+        <option value="512">512px</option><option value="256">256px</option>
+      </select></label>
+    </div>
+    <p class="muted">Pinch thumb and index finger together to draw; open them to lift the pen.
+      To use a tool, hover over its button and pinch. Camera frames are processed in this browser only. The Mirror gets the ink layer, never the camera.</p>
+  </section>
+
+  <div class="side-col">
+  <section class="panel">
+    <div class="room">
+      <div class="qr" id="qr"></div>
+      <div>
+        <div class="muted">Join on your phone · room code</div>
+        <div class="code" id="roomCode">····</div>
+        <div class="joinurl" id="joinUrl">Connecting…</div>
+      </div>
+    </div>
+    <div class="muted" id="playerCount" style="margin-top:12px;text-align:left">No one has joined yet.</div>
+    <ul class="players" id="players"></ul>
+  </section>
+
+  <section class="panel">
+    <div class="sees" id="sees">The Mirror awaits…</div>
+    <div class="stats">
+      <div><b id="p50">–</b><small>p50</small></div>
+      <div><b id="p90">–</b><small>p90</small></div>
+      <div><b id="max">–</b><small>max</small></div>
+      <div><b id="under">–</b><small>under 5s</small></div>
+    </div>
+    <p class="muted">Round trip = what the game feels. API = Muse Spark alone. In auto mode a tick is skipped if the previous guess hasn't returned yet.</p>
+    <ol id="log" reversed></ol>
+  </section>
+  </div>
+</main>
+
+<script type="module">
+const MP = 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.1';
+const HAND_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
+const BG = '#120e28';
+
+const $ = (id) => document.getElementById(id);
+const ink = $('ink'), cursor = $('cursor'), video = $('video');
+const ctx = ink.getContext('2d'), cctx = cursor.getContext('2d');
+const S = ink.width;
+const times = [];
+let busy = false, autoTimer = null, skipped = 0;
+
+// ---------- tools + stroke history ----------
+// History is a list of actions: strokes and clears. Undo/redo replays it.
+const COLORS = ['#ffd666', '#ff7a9c', '#7ec8ff', '#8ef0a8', '#c79bff', '#ffffff'];
+const SIZES = [[5, 'Thin'], [9, 'Med'], [18, 'Thick']];
+const tool = { color: COLORS[0], eraser: false, size: 1 };
+let history = [], redoStack = [], current = null;
+const brushWidth = () => SIZES[tool.size][0];
+
+const swatches = COLORS.map((c, i) => {
+  const b = document.createElement('button');
+  b.className = 'airbtn swatch' + (i === 0 ? ' on' : '');
+  b.style.background = c;
+  b.title = `Color ${i + 1} (key ${i + 1})`;
+  b.onclick = () => pickColor(i);
+  $('eraser').before(b);
+  return b;
+});
+function pickColor(i) {
+  tool.color = COLORS[i];
+  setEraser(false);
+  swatches.forEach((b, j) => b.classList.toggle('on', j === i));
+}
+function setEraser(on) {
+  tool.eraser = on;
+  $('eraser').classList.toggle('on', on);
+}
+function cycleSize() {
+  tool.size = (tool.size + 1) % SIZES.length;
+  $('brush').textContent = SIZES[tool.size][1];
+}
+$('eraser').onclick = () => setEraser(!tool.eraser);
+$('brush').onclick = cycleSize;
+
+function styleFor(s) {
+  ctx.lineCap = ctx.lineJoin = 'round';
+  ctx.lineWidth = s.eraser ? s.width * 2.5 : s.width;
+  ctx.globalCompositeOperation = s.eraser ? 'destination-out' : 'source-over';
+  ctx.strokeStyle = s.eraser ? '#000' : s.color;
+  ctx.shadowColor = s.color;
+  ctx.shadowBlur = s.eraser ? 0 : 10; // wand glow
+}
+function drawSegment(s, a, b) {
+  styleFor(s);
+  ctx.beginPath(); ctx.moveTo(...a); ctx.lineTo(...b); ctx.stroke();
+}
+function drawStroke(s) {
+  if (s.points.length === 1) return drawSegment(s, s.points[0], s.points[0]);
+  for (let i = 1; i < s.points.length; i++) drawSegment(s, s.points[i - 1], s.points[i]);
+}
+function redraw() {
+  ctx.clearRect(0, 0, S, S);
+  for (const a of history) a.type === 'clear' ? ctx.clearRect(0, 0, S, S) : drawStroke(a);
+  if (current) drawStroke(current);
+}
+
+function beginStroke(p) {
+  current = { type: 'stroke', color: tool.color, width: brushWidth(), eraser: tool.eraser, points: [p] };
+  drawSegment(current, p, p);
+}
+function extendStroke(p) {
+  if (!current) return;
+  drawSegment(current, current.points.at(-1), p);
+  current.points.push(p);
+}
+function endStroke() {
+  if (!current) return;
+  commit(current);
+  current = null;
+}
+function commit(action) {
+  history.push(action);
+  redoStack = [];
+  updateHistoryButtons();
+}
+function undo() {
+  if (current || !history.length) return;
+  redoStack.push(history.pop());
+  redraw(); updateHistoryButtons();
+}
+function redo() {
+  if (current || !redoStack.length) return;
+  history.push(redoStack.pop());
+  redraw(); updateHistoryButtons();
+}
+function clearInk() {
+  endStroke();
+  if (!history.length || history.at(-1).type === 'clear') return;
+  commit({ type: 'clear' }); // undoable
+  redraw();
+}
+function updateHistoryButtons() {
+  $('undo').disabled = !history.length;
+  $('redo').disabled = !redoStack.length;
+}
+$('undo').onclick = undo;
+$('redo').onclick = redo;
+
+// What's under a canvas-space point: an air button, a toolbar (no-draw zone), or neither.
+function hitAt(p) {
+  const r = ink.getBoundingClientRect();
+  const el = document.elementFromPoint(r.left + p[0] * r.width / S, r.top + p[1] * r.height / S);
+  if (!el || !el.closest('.stage')) return { btn: null, bar: null };
+  return { btn: el.closest('.airbtn'), bar: el.closest('.airbar') };
+}
+
+// ---------- mouse / touch drawing (fallback) ----------
+// Mouse users just click the toolbar buttons; strokes pause while passing under a toolbar.
+let mouseDown = false;
+const pos = (e) => {
+  const r = ink.getBoundingClientRect();
+  return [(e.clientX - r.left) * S / r.width, (e.clientY - r.top) * S / r.height];
+};
+ink.addEventListener('pointerdown', (e) => { mouseDown = true; beginStroke(pos(e)); ink.setPointerCapture(e.pointerId); });
+ink.addEventListener('pointermove', (e) => {
+  if (!mouseDown) return;
+  const p = pos(e);
+  if (hitAt(p).bar) endStroke();
+  else if (current) extendStroke(p);
+  else beginStroke(p);
+});
+['pointerup', 'pointercancel'].forEach((t) => ink.addEventListener(t, () => { mouseDown = false; endStroke(); }));
+
+// ---------- hand tracking ----------
+let landmarker = null, lastVideoTime = -1;
+// pinched: thumb+index together. mode: what this pinch is doing ('draw' | 'paused' | 'button' | null).
+const hand = { pinched: false, mode: null, pos: null, hoverBtn: null, lostFrames: 0 };
+const PINCH_DOWN = 0.28, PINCH_UP = 0.42; // hysteresis, relative to hand size
+const SMOOTH = 0.45; // 0..1, higher = snappier, lower = steadier
+
+// Start downloading the tracker (~21 MB) as soon as the page opens, in parallel with the camera.
+const trackerReady = (async () => {
+  const t0 = performance.now();
+  const { FilesetResolver, HandLandmarker } = await import(`${MP}/vision_bundle.mjs`);
+  const fileset = await FilesetResolver.forVisionTasks(`${MP}/wasm`);
+  const lm = await HandLandmarker.createFromOptions(fileset, {
+    baseOptions: { modelAssetPath: HAND_MODEL, delegate: 'GPU' },
+    runningMode: 'VIDEO',
+    numHands: 1,
+  });
+  console.log(`Hand tracker ready in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+  return lm;
+})();
+trackerReady.catch(() => {}); // reported by startCamera
+
+// The camera starts on page load. The browser's permission prompt is the opt-in here;
+// the real game should still have its own opt-in screen (see CLAUDE.md privacy notes).
+// The button stays as a retry if permission is denied or the camera is busy.
+async function startCamera() {
+  $('cam').disabled = true;
+  try {
+    // Camera and tracker start in parallel; show the feed as soon as it's live.
+    $('handStatus').textContent = 'Starting camera…';
+    const t0 = performance.now();
+    video.srcObject?.getTracks().forEach((t) => t.stop()); // on retry, release the old stream
+    video.srcObject = await navigator.mediaDevices.getUserMedia({ video: { width: 1280, height: 720 }, audio: false });
+    await video.play();
+    console.log(`Camera live in ${((performance.now() - t0) / 1000).toFixed(1)}s`);
+    $('cam').textContent = 'Camera on';
+    $('handStatus').textContent = 'Loading hand tracker…';
+    landmarker = await trackerReady;
+    $('handStatus').textContent = 'Show your hand…';
+    requestAnimationFrame(track);
+  } catch (e) {
+    $('cam').disabled = false;
+    $('cam').textContent = 'Retry camera';
+    $('handStatus').textContent = 'Camera error: ' + e.message;
+  }
+}
+$('cam').onclick = startCamera;
+startCamera();
+$('showCam').onchange = (e) => video.classList.toggle('hidden', !e.target.checked);
+
+// Map a normalized landmark to ink-canvas pixels, matching the mirrored object-fit: cover video.
+function toCanvas(lm) {
+  const vw = video.videoWidth, vh = video.videoHeight;
+  const scale = Math.max(S / vw, S / vh);
+  const offX = (S - vw * scale) / 2, offY = (S - vh * scale) / 2;
+  return [(1 - lm.x) * vw * scale + offX, lm.y * vh * scale + offY];
+}
+
+function track() {
+  if (video.currentTime !== lastVideoTime) {
+    lastVideoTime = video.currentTime;
+    const res = landmarker.detectForVideo(video, performance.now());
+    const lms = res.landmarks?.[0];
+    if (lms) {
+      hand.lostFrames = 0;
+      const d = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+      const handSize = d(lms[0], lms[9]) || 1e-6; // wrist -> middle knuckle
+      const pinch = d(lms[4], lms[8]) / handSize; // thumb tip <-> index tip
+      // Pen tip = midpoint of thumb and index tips, smoothed.
+      const raw = toCanvas({ x: (lms[4].x + lms[8].x) / 2, y: (lms[4].y + lms[8].y) / 2 });
+      hand.pos = hand.pos ? [hand.pos[0] + (raw[0] - hand.pos[0]) * SMOOTH, hand.pos[1] + (raw[1] - hand.pos[1]) * SMOOTH] : raw;
+
+      const { btn, bar } = hitAt(hand.pos);
+      setHover(hand.pinched ? null : btn);
+
+      if (!hand.pinched && pinch < PINCH_DOWN) {
+        // Pinch starts: press a button if over one, otherwise start drawing.
+        hand.pinched = true;
+        if (btn) { hand.mode = 'button'; pressAirButton(btn); }
+        else if (bar) hand.mode = 'paused';
+        else { hand.mode = 'draw'; beginStroke(hand.pos); }
+      } else if (hand.pinched && pinch > PINCH_UP) {
+        releasePinch();
+      } else if (hand.pinched) {
+        // Dragging into a toolbar pauses the stroke; leaving it resumes with a new stroke.
+        if (hand.mode === 'draw' && bar) { endStroke(); hand.mode = 'paused'; }
+        else if (hand.mode === 'paused' && !bar) { hand.mode = 'draw'; beginStroke(hand.pos); }
+        else if (hand.mode === 'draw') extendStroke(hand.pos);
+      }
+
+      $('handStatus').textContent =
+        hand.mode === 'draw' ? (tool.eraser ? 'Erasing' : 'Drawing ✦')
+        : btn && !hand.pinched ? `Pinch to press "${btn.title || btn.textContent}"`
+        : 'Hand seen. Pinch to draw.';
+    } else if (++hand.lostFrames > 5) {
+      releasePinch();
+      setHover(null);
+      hand.pos = null;
+      $('handStatus').textContent = 'Show your hand…';
+    }
+    drawCursor();
+  }
+  requestAnimationFrame(track);
+}
+
+function releasePinch() {
+  if (hand.mode === 'draw') endStroke();
+  hand.pinched = false;
+  hand.mode = null;
+}
+
+function setHover(btn) {
+  if (hand.hoverBtn === btn) return;
+  hand.hoverBtn?.classList.remove('hover');
+  btn?.classList.add('hover');
+  hand.hoverBtn = btn;
+}
+
+function pressAirButton(btn) {
+  if (btn.disabled) return;
+  btn.click();
+  btn.classList.add('flash');
+  setTimeout(() => btn.classList.remove('flash'), 180);
+}
+
+function drawCursor() {
+  cctx.clearRect(0, 0, S, S);
+  if (!hand.pos) return;
+  const w = brushWidth();
+  const drawing = hand.mode === 'draw';
+  cctx.beginPath();
+  if (hand.hoverBtn || hand.mode === 'button' || hand.mode === 'paused') {
+    // Pointer over the toolbar: plain white ring, filled while pinched.
+    cctx.arc(...hand.pos, 10, 0, Math.PI * 2);
+    cctx.strokeStyle = '#ffffff'; cctx.lineWidth = 3; cctx.stroke();
+    if (hand.pinched) { cctx.fillStyle = 'rgba(255,255,255,0.6)'; cctx.fill(); }
+  } else if (tool.eraser) {
+    // Ring the size of the eraser, dashed while hovering.
+    cctx.arc(...hand.pos, w * 1.25, 0, Math.PI * 2);
+    cctx.setLineDash(drawing ? [] : [4, 4]);
+    cctx.strokeStyle = '#ffffff'; cctx.lineWidth = 2; cctx.stroke();
+    cctx.setLineDash([]);
+  } else {
+    cctx.arc(...hand.pos, drawing ? Math.max(5, w / 2 + 2) : 14, 0, Math.PI * 2);
+    if (drawing) { cctx.fillStyle = tool.color; cctx.fill(); }
+    else { cctx.strokeStyle = tool.color; cctx.lineWidth = 2; cctx.stroke(); }
+  }
+}
+
+// ---------- the Mirror ----------
+// Snapshot = ink layer composited on a plain background. Never the camera.
+function snapshot() {
+  const size = Number($('size').value);
+  const off = document.createElement('canvas');
+  off.width = off.height = size;
+  const o = off.getContext('2d');
+  o.fillStyle = BG;
+  o.fillRect(0, 0, size, size);
+  o.drawImage(ink, 0, 0, size, size);
+  return off.toDataURL('image/png');
+}
+
+async function ask() {
+  if (busy) { skipped++; updateStats(); return; }
+  busy = true;
+  $('sees').textContent = 'The Mirror ponders…';
+  const t0 = performance.now();
+  try {
+    const res = await fetch('/guess', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: snapshot(), model: $('model').value, effort: $('effort').value }),
+    });
+    const data = await res.json();
+    const ms = performance.now() - t0;
+    if (data.error) throw new Error(data.error);
+    times.push(ms);
+    $('sees').innerHTML = 'The Mirror sees: <span></span>';
+    $('sees').querySelector('span').textContent = data.text + '…';
+    const li = document.createElement('li');
+    li.className = ms < 5000 ? 'fast' : 'slow';
+    const tok = data.usage ? ` · ${data.usage.completion_tokens} out tok` : '';
+    li.textContent = `${(ms / 1000).toFixed(2)}s round trip (API ${(data.apiMs / 1000).toFixed(2)}s${tok}) · ${$('model').value}/${$('effort').value} → "${data.text}"`;
+    $('log').prepend(li);
+    updateStats();
+  } catch (e) {
+    $('sees').textContent = 'Error: ' + e.message;
+  } finally {
+    busy = false;
+  }
+}
+
+function updateStats() {
+  if (!times.length) return;
+  const s = [...times].sort((a, b) => a - b);
+  const pct = (p) => s[Math.min(s.length - 1, Math.floor(p / 100 * s.length))];
+  const f = (ms) => (ms / 1000).toFixed(2) + 's';
+  $('p50').textContent = f(pct(50));
+  $('p90').textContent = f(pct(90));
+  $('max').textContent = f(s[s.length - 1]);
+  $('under').textContent = `${s.filter((t) => t < 5000).length}/${s.length}` + (skipped ? ` (${skipped} skipped)` : '');
+}
+
+function toggleAuto() {
+  if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+  else { autoTimer = setInterval(ask, 5000); ask(); }
+  $('auto').textContent = `Auto: ${autoTimer ? 'on' : 'off'}`;
+  $('auto').classList.toggle('on', Boolean(autoTimer));
+}
+
+$('ask').onclick = ask;
+$('clear').onclick = clearInk;
+$('auto').onclick = toggleAuto;
+// ---------- room / lobby ----------
+// The host owns a room on the server. The code is kept across reloads so phones stay joined.
+let roomWs = null;
+function connectRoom() {
+  roomWs = new WebSocket(`ws://${location.host}/ws`);
+  roomWs.onopen = () => {
+    let code = null;
+    try { code = sessionStorage.getItem('mirror-room'); } catch {}
+    roomWs.send(JSON.stringify({ type: 'host', code }));
+  };
+  roomWs.onmessage = (e) => {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'room') {
+      try { sessionStorage.setItem('mirror-room', msg.code); } catch {}
+      $('roomCode').textContent = msg.code;
+      $('qr').innerHTML = msg.qrSvg; // generated by our own server
+      $('joinUrl').textContent = msg.joinBase.replace(/^https?:\/\//, '');
+    } else if (msg.type === 'lobby') {
+      const n = msg.players.length;
+      $('playerCount').textContent = n ? `${n} in the Kingdom (click a name to remove)` : 'No one has joined yet.';
+      $('players').replaceChildren(...msg.players.map((p) => {
+        const li = document.createElement('li');
+        li.textContent = p.name;
+        if (!p.connected) { li.className = 'away'; li.title = 'Phone disconnected (asleep?)'; }
+        li.onclick = () => roomWs.send(JSON.stringify({ type: 'kick', playerId: p.id }));
+        return li;
+      }));
+    }
+  };
+  roomWs.onclose = () => {
+    $('joinUrl').textContent = 'Server disconnected. Retrying…';
+    setTimeout(connectRoom, 1500);
+  };
+}
+connectRoom();
+
+// Keyboard shortcuts, since your drawing hand is busy.
+addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'SELECT') return;
+  const k = e.key.toLowerCase();
+  if (k === 'z' && e.shiftKey) { e.preventDefault(); return redo(); }
+  if (k === 'z') { e.preventDefault(); return undo(); }
+  if (k === 'y') { e.preventDefault(); return redo(); }
+  if (e.ctrlKey || e.metaKey) return;
+  if (k === 'c') clearInk();
+  if (k === 'g') ask();
+  if (k === 'a') toggleAuto();
+  if (k === 'e') setEraser(!tool.eraser);
+  if (k >= '1' && k <= String(COLORS.length)) pickColor(Number(k) - 1);
+});
+</script>
+</body>
+</html>

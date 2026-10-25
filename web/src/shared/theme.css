@@ -1,0 +1,90 @@
+/* Mirror, Mirror — Wonderland theme (from design/Mirror Mirror Wonderland.dc.html, turn 7). */
+:root {
+  --ivory: #FBF1D6;
+  --paper: #FFFBEF;
+  --card: #FFFDF6;
+  --ink: #2b2421;
+  --muted: #6b5a45;
+  --gilt-1: #F7E2A2;
+  --gilt-2: #E6C06A;
+  --gilt-3: #C8963E;
+  --gilt-4: #B07D2E;
+  --gilt-5: #F0D384;
+  --gilt-dark: #93652A;
+  --cream: #FFF4CF;
+  --rose: #B33A4C;
+  --rose-dark: #8E2335;
+  --rose-soft: #E6A0A8;
+  --teal: #2F6B70;
+  --lilac: #6A4FA0;
+  --sage: #3F7A55;
+  --night: #211c38;
+  --canvas: #120e28;
+  --gilt-grad: linear-gradient(135deg, #F7E2A2, #C8963E 28%, #F0D384 52%, #B07D2E 76%, #E6C06A);
+  --font-script: 'Princess Sofia', cursive;
+  --font-body: Prociono, Georgia, serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { font-family: var(--font-body); color: var(--ink); background: var(--ivory); -webkit-font-smoothing: antialiased; }
+button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+.script { font-family: var(--font-script); color: var(--gilt-dark); line-height: 1.05; }
+.kicker { font-size: 12px; letter-spacing: .16em; text-transform: uppercase; color: var(--lilac); }
+.muted { color: var(--muted); }
+
+/* Buttons */
+.gilt-btn, .paper-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 56px; padding: 0 30px; border: 0; border-radius: 999px; cursor: pointer;
+  font-family: var(--font-body); font-size: 21px; color: var(--ink);
+  transition: transform .08s, filter .15s;
+}
+.gilt-btn {
+  background: linear-gradient(180deg, var(--gilt-1), var(--gilt-2) 50%, var(--gilt-3));
+  box-shadow: inset 0 0 0 2px var(--cream), 0 0 0 2px var(--gilt-dark), 0 5px 0 var(--gilt-dark);
+}
+.paper-btn { background: var(--paper); box-shadow: inset 0 0 0 2px var(--gilt-3), 0 4px 0 var(--gilt-dark); }
+.gilt-btn:active, .paper-btn:active { transform: translateY(3px); }
+.gilt-btn:disabled, .paper-btn:disabled { opacity: .5; cursor: default; transform: none; }
+.gilt-btn:focus-visible, .paper-btn:focus-visible { outline: 3px solid var(--lilac); outline-offset: 4px; }
+
+/* Speech bubble: the Mirror talking */
+.speech {
+  position: relative; padding: 16px 22px; border-radius: 14px; background: var(--paper);
+  box-shadow: inset 0 0 0 2px var(--gilt-2), 0 8px 18px rgba(80, 50, 10, .14);
+}
+.speech .kicker { margin-bottom: 4px; }
+.speech .line { font-size: 21px; font-style: italic; line-height: 1.3; }
+
+/* Ribbon banner */
+.banner {
+  align-self: flex-start; padding: 8px 28px; font-size: 14px; letter-spacing: .14em; text-transform: uppercase;
+  clip-path: polygon(0 0, 100% 0, calc(100% - 14px) 50%, 100% 100%, 0 100%, 14px 50%);
+}
+
+/* Gilt picture frame */
+.frame {
+  padding: 20px; border-radius: 4px; background: var(--gilt-grad);
+  box-shadow: inset 0 0 0 2px var(--gilt-dark), inset 0 0 0 7px var(--gilt-1), inset 0 0 0 9px var(--gilt-dark), 0 14px 26px rgba(60, 40, 10, .25);
+}
+.frame .glass { position: relative; background: var(--canvas); box-shadow: 0 0 0 2px var(--gilt-dark); overflow: hidden; }
+.frame .glass img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; }
+
+.plaque {
+  padding: 6px 22px; border-radius: 4px; background: linear-gradient(var(--gilt-1), var(--gilt-2));
+  box-shadow: inset 0 0 0 1px var(--gilt-dark), 0 3px 0 var(--gilt-dark); font-style: italic;
+}
+
+.score-pill { padding: 10px 28px; border-radius: 999px; font-size: 28px; font-feature-settings: 'tnum'; }
+
+.sparkle { position: absolute; background: var(--gilt-2); clip-path: polygon(50% 0, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0 50%, 39% 39%); }
+
+@keyframes twinkle { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .55; transform: scale(.8); } }
+.sparkle { animation: twinkle 2.6s ease-in-out infinite; }
+.sparkle:nth-of-type(2n) { animation-delay: -1.3s; }
+.sparkle:nth-of-type(3n) { animation-delay: -.7s; }
+
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
